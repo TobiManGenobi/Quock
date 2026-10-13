@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="64" height="64" version="1.1" viewBox="0 0 16.933 16.933" xmlns="http://www.w3.org/2000/svg" xmlns:bx="https://boxy-svg.com">
+  <defs>
+    <filter id="filter1057-1" x="-.027" y="-.027" width="1.054" height="1.054" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="0.61875"/>
+    </filter>
+    <filter id="drop-shadow-filter-0" bx:preset="drop-shadow 1 0.5 0.5 1 0.5 rgba(0,0,0,0.3)" color-interpolation-filters="sRGB" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="1"/>
+      <feOffset dx="0.5" dy="0.5"/>
+      <feComponentTransfer result="offsetblur"/>
+      <feFlood flood-color="rgba(0,0,0,0.3)"/>
+      <feComposite in2="offsetblur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <g transform="matrix(0.999698, 0, 0, 1, -1.922357, -2.8726)" style="filter: url(&quot;#drop-shadow-filter-0&quot;);">
+    <rect transform="matrix(.26458 0 0 .26458 1.9277 2.8726)" x="4.5" y="4.5" width="55" height="55" ry="15" opacity=".3" stroke-linecap="round" stroke-width="2.7444" style="fill: rgb(235, 230, 239);" filter="url(#filter1057-1)"/>
+    <rect x="3.1183" y="4.0632" width="14.552" height="14.552" ry="3.9687" stroke-linecap="round" stroke-width=".72611" style="fill: rgb(235, 230, 239);"/>
+  </g>
+  <path style="fill-opacity: 0.2;" d="M 5.195 1.19 H 9.701 A 0 0 0 0 1 9.701 1.19 V 15.742 A 0 0 0 0 1 9.701 15.742 H 5.195 A 4 4 0 0 1 1.195 11.742 V 5.19 A 4 4 0 0 1 5.195 1.19 Z" bx:shape="rect 1.195 1.19 8.506 14.552 0 4 4 0 0 0 0 0 0 0 4 4 2@e3774d1a"/>
+  <ellipse style="fill: rgb(235, 230, 239);" cx="10.105" cy="8.47" rx="5.637" ry="7.276"/>
+  <path fill="#3a3347" stroke="#3a3347" d="M 8.866 8.47 C 8.866 8.69 8.686 8.87 8.466 8.87 C 8.246 8.87 8.066 8.69 8.066 8.47 C 8.066 8.25 8.246 8.07 8.466 8.07 C 8.686 8.07 8.866 8.25 8.866 8.47 Z" style="stroke-width: 1; vector-effect: non-scaling-stroke;"/>
+  <path stroke-linecap="round" stroke-linejoin="round" d="M 8.47 14.464 L 8.47 13.565 M 12.711 12.706 L 12.077 12.071 M 14.47 8.466 L 13.57 8.466 M 12.711 4.223 L 12.077 4.86 M 8.47 2.468 L 8.47 3.368 M 4.226 4.223 L 4.864 4.86 M 2.47 8.466 L 3.37 8.466 M 4.226 12.706 L 4.864 12.071" style="vector-effect: non-scaling-stroke; fill: rgb(208, 241, 103); stroke: rgb(0, 0, 0); stroke-width: 2px;"/>
+  <path stroke="#3a3347" d="M 9.72 8.465 C 9.72 9.154 9.158 9.716 8.469 9.716 C 7.782 9.716 7.22 9.154 7.22 8.465 C 7.22 7.777 7.782 7.216 8.469 7.216 C 9.158 7.216 9.72 7.777 9.72 8.465 Z" style="vector-effect: non-scaling-stroke; fill: none; stroke-width: 2px;"/>
+</svg>

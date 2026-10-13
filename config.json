@@ -1,0 +1,160 @@
+{
+    "version": 1,
+    "dock": {
+        "layout": {
+            "position": "bottom",
+            "height": 60,
+            "iconSize": 80,
+            "spacing": 0,
+            "padding": 0,
+            "margin": 0,
+            "maxDockHeight": 600,
+            "crossAxisPadding": 0,
+            "marginEnds": 0,
+            "marginEdge": 0,
+            "exclusiveZone": 0
+        },
+        "appearance": {
+            "backgroundColor": "",
+            "backgroundOpacity": 0.2,
+            "blur": true,
+            "showBackground": true,
+            "borderWidth": 0,
+            "borderColor": "00000000",
+            "borderRadius": 0,
+            "borderRadiusTopLeft": 30,
+            "borderRadiusTopRight": 30,
+            "borderRadiusBottomLeft": 30,
+            "borderRadiusBottomRight": 30,
+            "hoverBackgroundColor": "#00000000",
+            "disableRipple": true,
+            "concaveEdgeCorners": false,
+            "shadow": false,
+            "shadowDirection": "down",
+            "shadowAlpha": 0.9,
+            "contextMenuBackgroundColor": "#00000000",
+            "contextMenuBorderColor": "00000010",
+            "contextMenuTextColor": "",
+            "contextMenuSeparatorColor": "",
+            "contextMenuBorderRadius": -1,
+            "contextMenuBorderWidth": -1,
+            "contextMenuItemHeight": -1,
+            "contextMenuItemRadius": -1,
+            "contextMenuMinWidth": -1,
+            "contextMenuTextSize": -1,
+            "contextMenuIconSize": -1,
+            "contextMenuItemHoverColor": "",
+            "contextMenuItemRippleColor": ""
+        },
+        "icons": {
+            "activeScale": 1.25,
+            "inactiveScale": 1,
+            "activeOpacity": 1,
+            "inactiveOpacity": 1,
+            "activeIconShift": 10,
+            "magnify": false,
+            "magnifyActive": false,
+            "magnifyScale": 1.5,
+            "magnifyNeighborScale": 1.2,
+            "magnifyRadius": 2
+        },
+        "indicators": {
+            "indicatorWidth": 0,
+            "indicatorHeight": 0,
+            "indicatorColor": "",
+            "showDots": false,
+            "showInstanceCount": false,
+            "showAllWindowDots": false,
+            "maxIndicatorDots": 2,
+            "smartIndicator": false
+        },
+        "apps": {
+            "pinnedApps": [
+                "com.github.linuxappmanager.App",
+                "zen",
+                "org.gnome.Nautilus",
+                "__clock__",
+                "foot",
+                "org.gnome.TextEditor"
+            ],
+            "separatePinnedFromRunning": false,
+            "showSeparator": false,
+            "ignoredAppRegexes": [],
+            "showRunning": true,
+            "enableDragReorder": true
+        },
+        "interaction": {
+            "hoverPreview": false,
+            "hoverPreviewDelay": 400,
+            "hoverToReveal": false,
+            "keepPreviewOnClick": false,
+            "swipeSensitivity": 1,
+            "swipeThreshold": 0.25
+        },
+        "behavior": {
+            "enabled": true,
+            "pinnedOnStartup": true,
+            "showOnDesktop": true,
+            "smartAutoHide": false,
+            "activeMonitorOnly": false,
+            "reserveSpace": false,
+            "layer": "top",
+            "slideIn": true,
+            "iconsReadyTimeoutMs": 5000
+        },
+        "launcher": {
+            "launcherPosition": "none",
+            "launcherIcon": "grid-dots",
+            "launcherCustomImageColorize": false
+        },
+        "bounce": {
+            "bounceOnClick": true,
+            "bounceDistance": 10,
+            "bounceOnLaunch": true,
+            "bounceDurationMs": 600,
+            "bounceStyle": "doubleHop"
+        },
+        "screens": {
+            "screenList": [],
+            "monitorOverrides": []
+        },
+        "clock": {
+            "enabled": true,
+            "mode": "analog",
+            "analogBackground": "/home/tobiasmagnegraneberg/.config/quickshell/dock/clock.svg",
+            "digitalBackground": "",
+            "analogSeconds": true,
+            "analogHandColor": "#200070ff",
+            "analogSecondColor": "#30000000",
+            "showHour": true,
+            "showMinutes": true,
+            "hourSize": null,
+            "minuteSize": null,
+            "hourStretch": 1,
+            "minuteStretch": 1,
+            "hourOffsetX": 0,
+            "hourOffsetY": null,
+            "minuteOffsetX": 0,
+            "minuteOffsetY": 0,
+            "hourColor": "",
+            "minuteColor": "",
+            "hourWeight": "DemiBold",
+            "minuteWeight": "DemiBold",
+            "hourAlign": "center",
+            "minuteAlign": "center",
+            "clockSpacing": null
+        },
+        "osd": {
+            "enabled": true,
+            "holdMs": 1500,
+            "durationMs": 260,
+            "growWidth": 240
+        }
+    },
+    "theme": {
+        "accent": "#00000000",
+        "dark": true,
+        "animations": true,
+        "effects": true
+    }
+}
