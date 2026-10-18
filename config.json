@@ -4,19 +4,20 @@
         "layout": {
             "position": "bottom",
             "height": 60,
+            "backgroundHeight": null,
             "iconSize": 80,
-            "spacing": 0,
+            "spacing": -5,
             "padding": 0,
             "margin": 0,
-            "maxDockHeight": 600,
+            "maxDockHeight": 800,
             "crossAxisPadding": 0,
             "marginEnds": 0,
             "marginEdge": 0,
-            "exclusiveZone": 0
+            "exclusiveZone": 72
         },
         "appearance": {
             "backgroundColor": "",
-            "backgroundOpacity": 0.2,
+            "backgroundOpacity": 0.1,
             "blur": true,
             "showBackground": true,
             "borderWidth": 0,
@@ -53,7 +54,7 @@
             "inactiveOpacity": 1,
             "activeIconShift": 10,
             "magnify": false,
-            "magnifyActive": false,
+            "magnifyActive": true,
             "magnifyScale": 1.5,
             "magnifyNeighborScale": 1.2,
             "magnifyRadius": 2
@@ -72,8 +73,8 @@
             "pinnedApps": [
                 "com.github.linuxappmanager.App",
                 "zen",
-                "org.gnome.Nautilus",
                 "__clock__",
+                "org.gnome.Nautilus",
                 "foot",
                 "org.gnome.TextEditor"
             ],
@@ -100,7 +101,9 @@
             "reserveSpace": false,
             "layer": "top",
             "slideIn": true,
-            "iconsReadyTimeoutMs": 5000
+            "slideInDurationMs": 520,
+            "iconsReadyTimeoutMs": 5000,
+            "changeIconEnabled": true
         },
         "launcher": {
             "launcherPosition": "none",
@@ -148,7 +151,22 @@
             "enabled": true,
             "holdMs": 1500,
             "durationMs": 260,
-            "growWidth": 240
+            "growWidth": 200,
+            "tintOpacity": 0.2,
+            "volumeBands": {
+                "low": "#4eb356",
+                "mid": "#4eb356",
+                "high": "#4eb356",
+                "max": "#4eb356",
+                "boost": "#e04b45",
+                "muted": "#00000000"
+            },
+            "brightnessBands": {
+                "low": "#dccf0e",
+                "mid": "#dccf0e",
+                "high": "#dccf0e",
+                "max": "#dccf0e"
+            }
         }
     },
     "theme": {
