@@ -16,6 +16,11 @@ import Quickshell.Io
 // direction, up or down. The OSD confirms that the system saw the keypress; it
 // deliberately does not encode direction.
 //
+// MUTE raises that same OSD (see `muteAdjusted`), because muting is a sink
+// change the volume level cannot express: a muted sink KEEPS its volume, so
+// toggling mute moves no level and would otherwise produce no feedback at all.
+// The dock then draws its `volume_off` glyph for it, from `muted`.
+//
 // WHY THIS POLLS INSTEAD OF WATCHING `pactl subscribe`
 // `pactl subscribe` is a perfectly good event feed — it prints a line per
 // PulseAudio event, and `Event 'change' on sink #N` arrives promptly on a
@@ -45,6 +50,12 @@ Singleton {
 
     property bool muted: false
     property bool ready: false
+
+    // Whether a mute state has been observed yet. Distinguishes the first
+    // reading (the sink's initial state, which must not raise the OSD) from a
+    // later CHANGE, the same way `volume < 0` does for the volume path. Set by
+    // _observeMuted, the single funnel every mute source goes through.
+    property bool _muteSeen: false
 
     // ─── Volume ────────────────────────────────────────────────────
     // 0..maxLevel (150): a sink amplifies past 100, see `maxLevel` below.
@@ -83,6 +94,14 @@ Singleton {
     // `brightnessAdjusted` in BrightnessService.qml).
     signal volumeAdjusted(level: real)
 
+    // Emitted when the sink's MUTE state changes, in either direction (a mute
+    // or an unmute). Deliberately a signal of its own rather than a second
+    // `volumeAdjusted`: muting changes no volume level, and the dock's OSD
+    // handler for mute needs to size its bar from the CURRENT level while the
+    // glyph comes from `muted`, which by the time this fires already holds the
+    // NEW state. The initial read does not emit (see _observeMuted).
+    signal muteAdjusted()
+
     // Which CLI can answer a volume query: "wpctl" | "pactl" | "none".
     // Resolved once, by a single probe, at start-up.
     property string _backend: "none"
@@ -107,6 +126,14 @@ Singleton {
     // demand via `toggleMute()` below. The toggle is what the dock's mute
     // button calls, so it must stay reachable: it is declared AFTER
     // `muteProc` (see the ORDERING NOTE in the header).
+    //
+    // This 3 s poll is the FALLBACK, not the fast path. Where the backend is
+    // wpctl, the 200 ms volume poll below already carries the mute flag in its
+    // "Volume: 0.57 [MUTED]" output, so a mute keypress is seen within ~200 ms
+    // at no extra process cost. This poll stays for the pactl backend, whose
+    // get-sink-volume prints no mute flag, and as the read-back behind
+    // toggleMute. Every source funnels through _observeMuted(), so a change is
+    // reported exactly once however it was noticed.
     Timer {
         interval: 3000
         running: true
@@ -120,7 +147,7 @@ Singleton {
         running: false
         stdout: StdioCollector {
             onStreamFinished: {
-                root.muted = text.trim().includes("yes")
+                root._observeMuted(text.trim().includes("yes"))
                 root.ready = true
             }
         }
@@ -130,6 +157,14 @@ Singleton {
         id: muteProc
         command: root._pactlArgs(["set-sink-mute", "@DEFAULT_SINK@", "toggle"])
         running: false
+        // Write done: read the state straight back, so `muted` — and the OSD it
+        // drives — track the sink within a few ms instead of waiting for the
+        // 3 s poll. The 200 ms volume poll would normally catch it anyway; this
+        // makes the pactl backend, which has no such fast poll, just as quick,
+        // and keeps `muted` sourced only from real reads (see toggleMute).
+        // (`onExited`, not `onStreamFinished`: Process has no stream-finished
+        // signal — that one belongs to StdioCollector.)
+        onExited: if (!pollProc.running) pollProc.running = true
     }
 
     // ─── Backend probe (one-shot) ──────────────────────────────────
@@ -172,7 +207,15 @@ Singleton {
             ? root._wpctlArgs(["get-volume", "@DEFAULT_AUDIO_SINK@"])
             : root._pactlArgs(["get-sink-volume", "@DEFAULT_SINK@"])
         stdout: StdioCollector {
-            onStreamFinished: root._applyVolume(root._parseVolume(text))
+            onStreamFinished: {
+                root._applyVolume(root._parseVolume(text))
+                // wpctl's reading also carries the mute flag ("... [MUTED]"),
+                // so on this backend mute is detected on the same 200 ms poll
+                // as the volume, for free. pactl's get-sink-volume has no such
+                // flag, so that backend relies solely on the 3 s mute poll.
+                if (root._backend === "wpctl")
+                    root._observeMuted(text.includes("[MUTED]"))
+            }
         }
     }
 
@@ -217,12 +260,32 @@ Singleton {
     // Toggle the default sink's mute state. This is the public entry point
     // for the dock's mute button (DockControls.qml), which calls it on click.
     //
-    // `muted` is flipped optimistically so the button's icon responds on the
-    // same click rather than up to 3 s later; the 3 s poll above then confirms
-    // (or corrects) it from the real sink state.
+    // The write is deliberately NOT applied optimistically to `muted`. Instead
+    // the sink is written and then read straight back (see muteProc), so
+    // `muted` only ever mirrors the real sink and exactly one source changes
+    // it. The read-back lands within a frame or two of the click — the icon is
+    // not seen to lag — whereas an optimistic flip could be undone by the
+    // 200 ms volume poll whose reading was already in flight when the click
+    // arrived, which would make the OSD flash twice (once on the flip, once on
+    // the correction).
     function toggleMute(): void {
         muteProc.running = true
-        muted = !muted // optimistic update
+    }
+
+    // The ONE place `muted` is written, so every source (the 3 s pactl poll,
+    // the 200 ms wpctl volume poll, and the read-back after a toggle) reports a
+    // change identically and exactly once.
+    //
+    // The first value seen is the sink's initial state, NOT a change: it must
+    // not raise the OSD, or the dock would flash its mute glyph on every
+    // startup. `_muteSeen` is what tells the two apart — the same job that
+    // `volume < 0` does for the volume path.
+    function _observeMuted(nowMuted: bool): void {
+        const seen = root._muteSeen
+        root._muteSeen = true
+        if (nowMuted === root.muted) return
+        root.muted = nowMuted
+        if (seen) root.muteAdjusted()
     }
 
     // Build a wpctl argv: absolute path + args, no shell.
@@ -270,6 +333,34 @@ Singleton {
         volumeQueryProc.running = true
     }
 
+    // ─── Forced-feedback read (the ceiling case) ───────────────────
+    // Marks the NEXT completed volume read as "raise the OSD even without a
+    // change". Consumed by _applyVolume. See nudge().
+    property bool _nudgePending: false
+
+    // Read the sink level NOW and raise the OSD for the result even if the
+    // level is UNCHANGED.
+    //
+    // A press already at the ceiling is re-set to the same value, so it makes
+    // no change and the 200 ms poll stays silent; this is the only path that
+    // can acknowledge it. Called by the dock's IPC hook (dock/shell.qml), which
+    // niri's volume binds invoke alongside the wpctl step
+    // (`qs ipc -c dock call dock showVolumeOsd`, see ~/.config/niri/config.kdl).
+    //
+    // Reuses the SAME query Process as the poll, so the level is still read in
+    // exactly one place and written through the one funnel (_applyVolume). The
+    // usual busy guard applies, and it has one consequence: a read that was
+    // already in flight BEFORE the press may consume the mark and report the
+    // pre-press level — the very next poll then reports the real level, i.e. at
+    // most one poll of a slightly stale bar, then correct. At the ceiling that
+    // in-flight read is the maximum anyway, so the case this exists for is
+    // exact regardless.
+    function nudge(): void {
+        if (!root.active || root._backend === "none") return
+        root._nudgePending = true
+        if (!volumeQueryProc.running) volumeQueryProc.running = true
+    }
+
     function _parseVolume(raw: string): real {
         if (raw === undefined || raw === null || String(raw).length === 0) return -1
         const t = String(raw)
@@ -288,11 +379,17 @@ Singleton {
     function _applyVolume(v: real): void {
         if (v < 0) return
         const prev = root.volume
+        const forced = root._nudgePending
+        root._nudgePending = false
         root.volume = v
         root.volumeReady = true
         // Any real change raises the OSD, in either direction. The first read
         // has prev < 0 and therefore cannot qualify.
-        if (prev >= 0 && v !== prev) root.volumeAdjusted(v)
+        //
+        // `forced` is nudge()'s mark: the OSD is raised EVEN WITHOUT a change,
+        // which is the only way a press already AT the ceiling — re-set to the
+        // same value, so there is no change to report — can get feedback.
+        if (prev >= 0 && (v !== prev || forced)) root.volumeAdjusted(v)
     }
 
     Component.onCompleted: {

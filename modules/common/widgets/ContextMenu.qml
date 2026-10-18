@@ -808,6 +808,7 @@ Loader {
                                             IconImage {
                                                 source: iconLoader.resolvedIconUrl
                                                 implicitSize: Appearance.font.pixelSize.normal
+                                                asynchronous: true
                                             }
                                         }
                                     }

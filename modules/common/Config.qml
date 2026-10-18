@@ -42,6 +42,10 @@ Singleton {
             property int magnifyRadius: 2           // how many neighbors magnify
             property real height: 60
             property real iconSize: 35
+            // Fixed background thickness (px). null = auto (icon + padding).
+            // When set to a positive number the pill uses it verbatim, so
+            // magnified icons may overhang it.
+            property var backgroundHeight: null
             property real spacing: 2
             property real padding: 5
             property real margin: 8
@@ -363,6 +367,54 @@ Singleton {
                 // 64 * 5 / 100 = 3.2 px before — comfortably distinguishable.
                 // Brightness spans 0..100, giving 12 px per 5% step.
                 property real growWidth: 240
+
+                // Global opacity multiplier for the OSD BACKGROUND TINT only,
+                // 0..1. It scales the whole tint regardless of level, on top of
+                // the per-band alpha byte in the colours below and on top of
+                // the level-proportional grow driver — so it is the one knob
+                // that dims (or fully removes, at 0) the tint WITHOUT editing
+                // every band colour and WITHOUT touching the glyphs, which keep
+                // their own level-driven fade.
+                //
+                // 1.0 (default) leaves the tint exactly as the band alpha and
+                // the level alone produce it, i.e. the previous behaviour.
+                property real tintOpacity: 1.0
+
+                // ─── Band colours ────────────────────────────────────────
+                // The colours the dock tints itself with while the OSD shows,
+                // one per level band. Format is mako's `#rrggbbaa` (alpha byte
+                // INCLUDED, in mako's byte order — Dock.qml reorders it for Qt
+                // in `_makoColor`).
+                //
+                // These DEFAULTS are mirrored from `~/.config/mako/config`
+                // (`[app-name=OSD category=volume-*]` / `brightness-*`, their
+                // `progress-color` values) and from the band THRESHOLDS in
+                // `~/.config/niri/scripts/volume-osd.sh` (~lines 298-314) and
+                // `brightness-osd.sh`. The dock is tinted to match the mako
+                // notification OSD, so editing a colour here — or in
+                // config.json, into which these are materialised — on purpose
+                // overrides the DOCK's OSD only; it will no longer agree with
+                // what mako paints unless mako is changed to match.
+                //
+                // A band omitted from a map falls through to the per-band
+                // fallback in Dock.qml's `_triggerOsd`, so a partial edit is
+                // safe and a missing one is not fatal.
+                property var volumeBands: ({
+                    // progress-color, `[app-name=OSD category=volume-*]`
+                    low:   "#4a90d950",   // blue
+                    mid:   "#4eb35650",   // green
+                    high:  "#e0683f50",   // green turning orange
+                    max:   "#e04b4550",   // orange turning red
+                    boost: "#e04b4580",   // >100%: same red, higher alpha
+                    muted: "#00000050"    // black
+                })
+                property var brightnessBands: ({
+                    // progress-color, `[app-name=OSD category=brightness-*]`
+                    low:  "#f6c36d20",
+                    mid:  "#f3c64140",
+                    high: "#ebca0f60",
+                    max:  "#dccf0e90"
+                })
             }
         }
 
@@ -414,7 +466,8 @@ Singleton {
     // The OSD's keys persist to `dock.osd`, its own nested group for the same
     // reason as `clock`.
     readonly property var osdKeys: [
-        "enabled", "holdMs", "durationMs", "growWidth"
+        "enabled", "holdMs", "durationMs", "growWidth", "tintOpacity",
+        "volumeBands", "brightnessBands"
     ]
     // The `theme` group is a top-level sibling of `dock`, not one of the
     // `dock.*` schema groups, so it is snapshotted explicitly below rather
@@ -425,7 +478,7 @@ Singleton {
 
     function _buildConfigSchema() {
         return {
-            "layout": ["position", "height", "iconSize", "spacing", "padding", "margin", "maxDockHeight", "crossAxisPadding", "marginEnds", "marginEdge", "exclusiveZone"],
+            "layout": ["position", "height", "backgroundHeight", "iconSize", "spacing", "padding", "margin", "maxDockHeight", "crossAxisPadding", "marginEnds", "marginEdge", "exclusiveZone"],
             "appearance": ["backgroundColor", "backgroundOpacity", "blur", "showBackground", "borderWidth", "borderColor", "borderRadius", "borderRadiusTopLeft", "borderRadiusTopRight", "borderRadiusBottomLeft", "borderRadiusBottomRight", "hoverBackgroundColor", "disableRipple", "concaveEdgeCorners", "shadow", "shadowDirection", "shadowAlpha", "contextMenuBackgroundColor", "contextMenuBorderColor", "contextMenuTextColor", "contextMenuSeparatorColor", "contextMenuBorderRadius", "contextMenuBorderWidth", "contextMenuItemHeight", "contextMenuItemRadius", "contextMenuMinWidth", "contextMenuTextSize", "contextMenuIconSize", "contextMenuItemHoverColor", "contextMenuItemRippleColor"],
             "icons": ["activeScale", "inactiveScale", "activeOpacity", "inactiveOpacity", "activeIconShift", "magnify", "magnifyActive", "magnifyScale", "magnifyNeighborScale", "magnifyRadius"],
             "indicators": ["indicatorWidth", "indicatorHeight", "indicatorColor", "showDots", "showInstanceCount", "showAllWindowDots", "maxIndicatorDots", "smartIndicator"],

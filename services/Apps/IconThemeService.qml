@@ -273,8 +273,6 @@ Singleton {
                 root._themeIndexes = indexes
                 root._activeTheme = theme || "hicolor"
                 root._chain = root._buildChain(root._activeTheme)
-                console.log("dock IconThemeService: icon theme", root._activeTheme,
-                            "chain", JSON.stringify(root._chain))
                 root._fileChunks = root._buildFileChunks()
                 root._startFiles()
                 root._indexReady = true
@@ -289,12 +287,14 @@ Singleton {
     // (scan_theme, theme.rs:146-171) — a few hundred tiny finds spread over
     // the chain, versus the old full-disk index.
     //
-    // `-H` (follow symlinks on the command line ONLY) is REQUIRED here: the
-    // Colloid theme is a symlink farm at its top level
-    // (Colloid/apps -> ../Colloid-Light/apps), so a declared directory can
-    // itself be a symlink. Without -H find reports only the link itself and
-    // the active theme yields nothing. -H stays bounded because the directory
-    // is named explicitly and -maxdepth is 1, so it cannot walk a tree.
+    // `-H` (follow symlinks on the command line ONLY) is kept because a
+    // declared directory can itself be a symlink. Colloid used to be a
+    // symlink farm at its top level (Colloid/apps -> ../Colloid-Light/apps);
+    // it is now a single real directory, but other installed themes can still
+    // link their subdirectories around. Without -H find reports only the link
+    // itself and such a theme yields nothing. -H stays bounded because the
+    // directory is named explicitly and -maxdepth is 1, so it cannot walk a
+    // tree.
     //
     // Symlinks are matched as well as regular files: most of Colloid is
     // symlinks (foot.svg -> terminal.svg, 10B4_steam.0.svg -> steam.svg).
@@ -499,6 +499,7 @@ Singleton {
 
     property var _rasterIndex: ({})
     property var _rasterPending: []
+    property int _rasterInFlight: 0
     // Filenames already present in the cache dir, read once at startup. Without
     // this the in-memory index starts empty on every launch, so the dock
     // rendered the SVG (and logged its warnings) before re-converting, even
@@ -506,8 +507,19 @@ Singleton {
     property var _cachedFiles: ({})
     property string rasterDir: (Quickshell.env("XDG_CACHE_HOME") ?? (Quickshell.env("HOME") ?? "/tmp") + "/.cache") + "/quickshell/dock-icons"
 
+    function _normalizeRasterSize(size): int {
+        const px = size > 0 ? size : 256
+        if (px <= 64) return 64
+        if (px <= 128) return 128
+        if (px <= 256) return 256
+        return 512
+    }
+
     function _rasterKey(svgPath, size): string {
-        return `${size}_${svgPath.replace(/[^a-zA-Z0-9]/g, "_")}`
+        const px = root._normalizeRasterSize(size)
+        const digest = (typeof Qt !== "undefined" && Qt.md5) ? Qt.md5(svgPath) : ""
+        const slug = digest ? digest.slice(0, 16) : svgPath.replace(/[^a-zA-Z0-9]/g, "_")
+        return `${px}_${slug}`
     }
 
     // PURE: PNG path for an SVG URL, or "" if none yet. Must not mutate
@@ -554,7 +566,7 @@ Singleton {
         const path = url.slice(7)
         const lower = path.toLowerCase()
         if (!lower.endsWith(".svg") && !lower.endsWith(".svgz")) return
-        const px = size > 0 ? size : 256
+        const px = root._normalizeRasterSize(size)
         const key = root._rasterKey(path, px)
         if (root._rasterIndex[key]) return
         if (root._rasterPending.some(j => j.key === key)) return
@@ -586,31 +598,46 @@ Singleton {
         return root.rasterFor(url, px)
     }
 
-    // Start the next queued job if the converter is idle.
+    // Start a small batch of queued jobs concurrently, so converting a cold
+    // app-icon cache does not serialise across the whole dock. Each job prints
+    // OK:<key> or FAIL:<key> so partial failures are tracked individually.
     function _pumpRaster(): void {
         if (_rasterProc.running) return
         if (root._rasterPending.length === 0) return
-        const job = root._rasterPending[0]
+        const count = Math.min(4, root._rasterPending.length)
+        root._rasterInFlight = count
+        const batch = root._rasterPending.slice(0, count)
+        const cmds = batch.map(j =>
+            `if rsvg-convert -w ${j.size} -h ${j.size} "${j.svg}" -o "${j.out}"; then echo "OK:${j.key}"; else echo "FAIL:${j.key}"; fi`).join("; ")
         _rasterProc.command = ["/usr/bin/env", "sh", "-c",
-            `mkdir -p "${root.rasterDir}" && rsvg-convert -w ${job.size} -h ${job.size} "${job.svg}" -o "${job.out}"`]
+            `mkdir -p "${root.rasterDir}" && ${cmds}`]
         _rasterProc.running = true
     }
 
     Process {
         id: _rasterProc
         running: false
-        function onExited(exitCode) {
-            // Success is the exit code; rsvg-convert returns non-zero if it
-            // cannot parse the SVG.
-            if (exitCode === 0) {
-                const done = root._rasterPending[0]
-                const idx = {}
-                for (const k in root._rasterIndex) idx[k] = root._rasterIndex[k]
-                if (done) idx[done.key] = `file://${done.out}`
-                root._rasterIndex = idx
+        stdout: StdioCollector {
+            id: _rasterStdout
+        }
+        onExited: function() {
+            const text = (_rasterStdout.text || "")
+            const doneKeys = {}
+            for (const line of text.split(/\n/)) {
+                const m = line.trim().match(/^OK:(.+)$/)
+                if (m) doneKeys[m[1]] = true
             }
+            const count = root._rasterInFlight > 0 ? root._rasterInFlight : 1
+            const batch = root._rasterPending.slice(0, Math.min(count, root._rasterPending.length))
+            const idx = {}
+            for (const k in root._rasterIndex) idx[k] = root._rasterIndex[k]
+            for (const job of batch) {
+                if (doneKeys[job.key]) idx[job.key] = `file://${job.out}`
+            }
+            root._rasterIndex = idx
             if (root._rasterPending.length > 0)
-                root._rasterPending = root._rasterPending.slice(1)
+                root._rasterPending = root._rasterPending.slice(Math.min(count, root._rasterPending.length))
+            root._rasterInFlight = 0
             running = false
             Qt.callLater(() => root._pumpRaster())
         }

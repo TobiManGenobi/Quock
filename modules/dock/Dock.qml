@@ -54,7 +54,9 @@ Scope {
     // configured growWidth.
     //
     // ANY CHANGE is handled: AudioService/BrightnessService emit
-    // volumeAdjusted/brightnessAdjusted for rises AND falls alike.
+    // volumeAdjusted/brightnessAdjusted for rises AND falls alike, and
+    // AudioService emits muteAdjusted when the sink is muted or unmuted (a mute
+    // keeps its volume, so that feedback needs its own signal).
     //
     // WHY THE LENGTH CARRIES THE LEVEL (and not just "grow to full")
     // The OSD used to animate a fixed 0 → 1 ramp. That works exactly once:
@@ -140,41 +142,25 @@ Scope {
 
     // ─── OSD level-band colour tint ─────────────────────────────────
     // While the volume/brightness OSD is showing, the dock background is
-    // tinted with the SAME colour mako paints that notification's bar in, so
-    // the dock and the OSD the user actually sees always agree.
+    // tinted with the SAME colour the OSD uses, so the two always agree.
     //
-    // ─────────────────────────────────────────────────────────────────
-    // !! DUPLICATED FROM MAKO — KEEP IN SYNC !!
-    // These tables are a verbatim copy of `~/.config/mako/config`, sections
-    // `[app-name=OSD category=volume-*]` and `[app-name=OSD category=brightness-*]`
-    // (their `progress-color` values), and of the band thresholds in
-    // `~/.config/niri/scripts/volume-osd.sh` (~lines 297-315) and
-    // `~/.config/niri/scripts/brightness-osd.sh` (~lines 297-301).
-    // mako cannot colour a progress bar by value, so those two scripts send
-    // their computed band as the notification CATEGORY and mako matches it
-    // against the sections above. If mako's colours or the scripts' thresholds
-    // are ever edited, these tables must be edited with them or the dock will
-    // disagree with the OSD. Edit them HERE, in one place, only.
-    // ─────────────────────────────────────────────────────────────────
+    // The tables themselves now live in Config.qml as `dock.osd.volumeBands` /
+    // `dock.osd.brightnessBands`, which is what materialises them into
+    // config.json for editing in place (see the banner there). Their DEFAULTS
+    // are mirrored from `~/.config/mako/config` (`[app-name=OSD
+    // category=volume-*]` / `brightness-*`, `progress-color`) and from the band
+    // thresholds in `~/.config/niri/scripts/volume-osd.sh` (~lines 298-314) and
+    // `brightness-osd.sh`. Editing them in config.json deliberately decouples
+    // the dock OSD from mako; the defaults alone change nothing.
     //
-    // The colours are kept as the full `#rrggbbaa` string from mako, alpha
-    // byte included, so the table stays byte-comparable against the mako config.
-    readonly property var _osdVolumeBands: ({
-        // progress-color, `[app-name=OSD category=volume-*]`
-        low:   "#4a90d950",   // blue
-        mid:   "#4eb35650",   // green
-        high:  "#e0683f50",   // green turning orange
-        max:   "#e04b4550",   // orange turning red
-        boost: "#e04b4580",   // >100%: same red, higher alpha
-        muted: "#00000050"    // black
-    })
-    readonly property var _osdBrightnessBands: ({
-        // progress-color, `[app-name=OSD category=brightness-*]`
-        low:  "#f6c36d20",
-        mid:  "#f3c64140",
-        high: "#ebca0f60",
-        max:  "#dccf0e90"
-    })
+    // The colours stay as the full `#rrggbbaa` mako string, alpha byte
+    // included, so the table is byte-comparable against the mako config.
+    //
+    // A band missing from the map (a partial edit) falls through to the
+    // per-band `?? …` fallbacks in _triggerOsd — a last resort so a malformed
+    // config can never throw here.
+    readonly property var _osdVolumeBands: Config.options?.dock?.osd?.volumeBands ?? ({})
+    readonly property var _osdBrightnessBands: Config.options?.dock?.osd?.brightnessBands ?? ({})
 
     // ── Band selection ──────────────────────────────────────────────
     // Mirrors volume-osd.sh:
@@ -275,8 +261,26 @@ Scope {
         }
     }
 
+    // Global OSD-tint opacity multiplier from config (dock.osd.tintOpacity),
+    // clamped to 0..1. Applied ONLY to the background tint strength below, so
+    // the level glyphs are unaffected: they fade on the grow driver alone.
+    //
+    // Clamped, not trusted: `_osdBlendTint` scales `ta = tint.a * strength`
+    // and then computes `outA = ta + base.a*(1-ta)`, which assumes `ta <= 1`.
+    // A value above 1 would push `ta` past 1 and drive `outA` negative — so a
+    // malformed config can never break the source-over maths.
+    readonly property real _osdTintOpacity: {
+        const v = Config.options?.dock?.osd?.tintOpacity ?? 1.0
+        return Math.max(0, Math.min(1, v))
+    }
+
+    // The tint strength is the level-proportional grow driver scaled by the
+    // global opacity multiplier. At tintOpacity 0 this is always 0, so
+    // _osdBlendTint early-returns the base colour: the background still grows
+    // and the glyph still appears, but the band colour never tints it.
     readonly property real _osdTintStrength:
-        root._osdVolumeGrow > 0 ? root._osdVolumeGrow : root._osdBrightnessGrow
+        (root._osdVolumeGrow > 0 ? root._osdVolumeGrow : root._osdBrightnessGrow)
+            * root._osdTintOpacity
 
     // Composites the current OSD band colour OVER the dock's resting
     // background colour, scaled by the grow driver. The resting colour is
@@ -363,6 +367,27 @@ Scope {
         hold.restart()
     }
 
+    // ─── Public OSD hook for the IPC channel (see shell.qml) ────────
+    // Read the sink level NOW and raise the volume OSD, even if the level did
+    // not move.
+    //
+    // This is what niri's volume binds call, alongside the wpctl step
+    // (`qs ipc -c dock call dock showVolumeOsd`), so a press already AT the
+    // ceiling — re-set to the same value, so no change for the 200 ms poll to
+    // see — still gets feedback.
+    //
+    // Delegating to AudioService.nudge() rather than triggering off the CACHED
+    // level here buys two things: the bar is drawn at the level the press
+    // actually produced even though the poll lags, and that read updates the
+    // cache, so the poll then sees no change and there is only ONE OSD kick per
+    // press rather than an instant stale one plus a corrective one.
+    //
+    // nudge() is a no-op when the OSD is switched off (it checks `active`), so
+    // this is safe to call unconditionally.
+    function showVolumeOsd(): void {
+        root._osdAudio.nudge()
+    }
+
     NumberAnimation {
         id: osdVolumeAnimShow
         target: root
@@ -440,6 +465,11 @@ Scope {
     Connections {
         target: AudioService
         function onVolumeAdjusted(level: real) { root._triggerOsd("volume", level) }
+        // A mute toggle moves no level, so the signal carries none: the bar
+        // keeps its length from the CURRENT volume while the glyph (volume_off)
+        // and the muted band colour come from `muted`, which AudioService has
+        // already updated to the new state before emitting.
+        function onMuteAdjusted() { root._triggerOsd("volume", root._osdAudio.volume) }
     }
     Connections {
         target: BrightnessService
@@ -606,7 +636,15 @@ Scope {
     }
 
     // mock: dockThickness() — icon + cell padding + cross-axis padding.
+    // The pill stays base size so magnified icons may overhang it.
+    function _peakFor(cfg: var): real {
+        const base = Math.max(cfg?.activeScale ?? 1.0, cfg?.inactiveScale ?? 0.85)
+        const ms = (cfg?.magnify ?? false) ? Math.max(1, cfg?.magnifyScale ?? 1.45) : 1
+        return Math.max(1, base * ms)
+    }
     function _thicknessFor(cfg: var): real {
+        const fixed = cfg?.backgroundHeight ?? null
+        if (fixed !== null && fixed !== undefined && fixed > 0) return fixed
         const icon = cfg?.iconSize ?? 35
         const cross = cfg?.crossAxisPadding ?? 8
         return icon + root.kCellPad * 2 + cross * 2
@@ -917,11 +955,7 @@ Scope {
                 // it tracks the pill while the padding around it stays
                 // unblurred. That is exactly the mock's arrangement — an
                 // enlarged surface whose blur region is the panel rect.
-                readonly property real _zoomPeak: {
-                    const base = Math.max(cfg?.activeScale ?? 1.0, cfg?.inactiveScale ?? 0.85)
-                    const ms = (cfg?.magnify ?? false) ? Math.max(1, cfg?.magnifyScale ?? 1.45) : 1
-                    return Math.max(1, base * ms)
-                }
+                readonly property real _zoomPeak: root._peakFor(cfg)
                 readonly property real _badgeSize: Math.max(16, (cfg?.iconSize ?? 35) * root.kBadgeSizeRatio)
                 readonly property real _badgeOverhang: (cfg?.showInstanceCount ?? true)
                         ? dockRoot._badgeSize * root.kBadgeCornerOverhang * dockRoot._zoomPeak : 0
@@ -1469,12 +1503,12 @@ Scope {
                     // correction note above). It only ever engages before the
                     // dock is laid out, where the pre-ready region is
                     // off-surface anyway and the exact size is irrelevant.
-                    x: dockRoot._ready
+                    x: (dockRoot._ready && dockRoot.reveal)
                         ? (dockHoverRegion.x + dockRoot._bgX)
                         : -100000
-                    width: Math.max(1, dockRoot._bgW)
-                    height: Math.max(1, dockRoot.panelH)
-                    y: dockRoot._ready ? dockRoot.panelOffsetY : -100000
+                    width: Math.max(1, (dockRoot._bgW > 0 ? dockRoot._bgW : 1))
+                    height: Math.max(1, (dockRoot.panelH > 0 ? dockRoot.panelH : 1))
+                    y: (dockRoot._ready && dockRoot.reveal) ? dockRoot.panelOffsetY : -100000
                     topLeftRadius: dockRoot.rTL
                     topRightRadius: dockRoot.rTR
                     bottomRightRadius: dockRoot.rBR
@@ -1778,6 +1812,34 @@ Scope {
                                 height: dockVisualRoot._osdGlyphSize
                                 iconSize: dockVisualRoot._osdGlyphSize
                                 text: root._osdMuted ? "volume_off" : "volume_up"
+                                // ── Mirrored horizontally ────────────────────
+                                // Material Symbols draws `volume_up` /
+                                // `volume_off` with the speaker cone on the LEFT
+                                // and the sound waves on the RIGHT. At the pill's
+                                // leading tip that reads as the waves pointing
+                                // back toward the centre, so the glyph is flipped
+                                // on the x axis and now radiates OUTWARD from the
+                                // leading edge.
+                                //
+                                // A Scale transform with an EXPLICIT centre
+                                // origin, deliberately NOT `scale: -1`: `scale`
+                                // is a single UNIFORM factor in Qt Quick, so a
+                                // negative one negates BOTH axes — a 180° rotation
+                                // that also turns the speaker upside down — and a
+                                // Transform's scale defaults to its (0,0) corner,
+                                // which would translate the glyph a full
+                                // glyph-width to the left instead of mirroring it
+                                // in place. Measured on Qt 6.10.2: a box at
+                                // x 30..70 with `scale: -1` maps its corners to
+                                // y 60↔20 (vertical flip), and a borderless Scale
+                                // moves it to x -10..30 (displaced); only the
+                                // centred origin below keeps the box at 30..70
+                                // while swapping which way the cone faces.
+                                transform: Scale {
+                                    origin.x: osdVolumeGlyph.width / 2
+                                    origin.y: osdVolumeGlyph.height / 2
+                                    xScale: -1
+                                }
                                 color: Appearance.colors.colOnLayer0
                                 opacity: root._osdVolumeGrow
                                 visible: opacity > 0.001

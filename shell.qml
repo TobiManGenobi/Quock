@@ -4,6 +4,7 @@
 
 import QtQuick
 import Quickshell
+import Quickshell.Io
 import qs.modules.common
 import qs.modules.dock
 
@@ -24,5 +25,18 @@ ShellRoot {
     readonly property var _forceConfig: Config
     readonly property var _forceAppearance: Appearance
 
-    Dock {}
+    Dock { id: dock }
+
+    // ── IPC ─────────────────────────────────────────────────────────
+    //   qs ipc -c dock call dock showVolumeOsd
+    //
+    // niri's volume-up/down binds invoke this in addition to volume-osd.sh
+    // (see ~/.config/niri/config.kdl). The dock reacts to volume only when
+    // the sink LEVEL changes, so a press already sitting at the ceiling —
+    // which `volume-osd.sh` re-sets to the same value — would otherwise
+    // produce no feedback at all. This restores it: see Dock.showVolumeOsd().
+    IpcHandler {
+        target: "dock"
+        function showVolumeOsd(): void { dock.showVolumeOsd() }
+    }
 }

@@ -50,6 +50,8 @@ Item {
     property real pointerMain: 0
     property bool pointerValid: false
 
+    // Base cell: row pitch follows the base icon size so magnified icons may
+    // overhang the background.
     readonly property real _cellMain: root.effectiveIconSize + 12
     readonly property real itemPitch: root._cellMain + (Config.options?.dock?.spacing ?? 2)
 
@@ -67,7 +69,7 @@ Item {
     // spacing (no trailing gap when the row is empty, matching the mock's flex
     // row, which never emits a gap without a following item).
     readonly property real _launcherExtent: _launcherVisible
-        ? (root.effectiveIconSize + 12 + (listView.count > 0 ? (Config.options?.dock?.spacing ?? 2) : 0))
+        ? (root._cellMain + (listView.count > 0 ? (Config.options?.dock?.spacing ?? 2) : 0))
         : 0
 
     // Per-item magnify state, recomputed in one place each frame so the scale
@@ -138,12 +140,15 @@ Item {
 
         // Hovered index still matters for two things the mock gets for free:
         // the magnifyActive opt-out and the neighbour cap.
-        const hovered = root.macHoveredIndex
-
         const prevScales = root.magnifyScales
         const prevOffsets = root.magnifyOffsets
         const activeScale = Config.options?.dock?.activeScale ?? 1.0
         const inactiveScale = Config.options?.dock?.inactiveScale ?? 0.85
+
+        // Hovered index still matters for two things the mock gets for free:
+        // the magnifyActive opt-out and the neighbour cap.
+        const hovered = root.macHoveredIndex
+
         const targetScales = []
         const targetMultipliers = []
         for (let i = 0; i < count; i++) {
@@ -154,6 +159,7 @@ Item {
             const isActive = !isSeparator && (item?.appIsActive ?? false)
             const base = isSeparator ? 1.0 : (isActive ? activeScale : inactiveScale)
             let multiplier = isSeparator ? 1.0 : root._hoverMultiplier(i)
+
             if (multiplier > 1.0) {
                 const dist = hovered < 0 ? 99 : Math.abs(hovered - i)
                 // magnifyActive: the icon never magnifies when its app is unfocused.
@@ -637,6 +643,10 @@ Item {
     // floor; the 8px clamp only guards against degenerate (<=0) sizes at
     // absurd item counts.
     readonly property real effectiveIconSize: {
+        // Before layout resolves, _availableSpace is 0 and maxIcon goes
+        // negative — fall back to full icon size instead of the 8px floor, so
+        // the first frames lay out correctly behind the readiness gate.
+        if (_availableSpace <= 0) return _configIconSize
         var maxIcon = (_availableSpace - (_itemCount - 1) * _spacing) / _itemCount - 12
         // Snap to a whole logical pixel. A fractional box size makes the icon
         // land on subpixel positions, and every device pixel of it is then a
@@ -857,7 +867,10 @@ Item {
             if (oTL.length !== nTL.length) return false
             for (let j = 0; j < oTL.length; j++) {
                 if (root._toplevelLiveKey(oTL[j]) !== root._toplevelLiveKey(nTL[j])) return false
-                if (!!oTL[j].activated !== !!nTL[j].activated) return false
+                // Under niri the activated flag flickers on plain focus moves,
+                // so ignore it there — the focused-window key above already
+                // carries the change. Elsewhere the flag is meaningful.
+                if (!CompositorService.isNiri && !!oTL[j].activated !== !!nTL[j].activated) return false
             }
         }
         return true
@@ -868,8 +881,12 @@ Item {
     // delegate is recreated with fresh values.
     function _clockFingerprint(): string {
         const c = Config.options?.dock?.clock ?? {}
-        return [c.mode, c.hourSize, c.minuteSize, c.hourStretch, c.minuteStretch,
-                c.hourColor, c.minuteColor, c.hourOffsetY, c.minuteOffsetY,
+        return [c.mode, c.showHour, c.showMinutes,
+                c.hourSize, c.minuteSize, c.hourStretch, c.minuteStretch,
+                c.hourColor, c.minuteColor,
+                c.hourWeight, c.minuteWeight,
+                c.hourAlign, c.minuteAlign,
+                c.hourOffsetX, c.hourOffsetY, c.minuteOffsetX, c.minuteOffsetY,
                 c.clockSpacing, c.analogBackground, c.analogSeconds,
                 c.analogHandColor, c.analogSecondColor].join("|")
     }
@@ -879,17 +896,14 @@ Item {
     // dock feature, not an application, so it no longer needs a magic string
     // in pinnedApps to exist at all: `enabled: true` alone puts it in the dock.
     //
-    // "__clock__" in pinnedApps survives only as a CONFIG SLOT for configs
-    // that already used it. It cannot re-enable a clock that the switch
-    // turned off — that would make the two disagree, with no way to tell
-    // which one the user meant. It no longer decides placement either:
-    // a special (non-app) entry rendered at its pinnedApps index lands in the
-    // middle of the dock, on top of a neighbouring app icon. Precedence:
+    // "__clock__" in pinnedApps is the clock's POSITION slot. It cannot
+    // re-enable a clock that the switch turned off — that would make the two
+    // disagree, with no way to tell which one the user meant. Precedence:
     //   enabled:false                → no clock entry, ever
-    //   enabled:true  + "__clock__"  → one entry, at the dock's leading end
+    //   enabled:true  + "__clock__"  → one entry, at its pinnedApps position
     //   enabled:true  + no sentinel  → one entry, at the dock's leading end
-    // Both enabled cases are identical in the model: the sentinel only tells
-    // _applyClockReorder which pinnedApps slot to write back to.
+    // The sentinel also tells _applyClockReorder which pinnedApps slot a
+    // clock drop writes back to.
     function _clockEnabled(): bool {
         return Config.options?.dock?.clock?.enabled === true
     }
@@ -1141,27 +1155,30 @@ Item {
             }
         }
 
-        // ─── Special entries live at the ENDS of the dock ────────────────
-        // A non-app entry (the clock, the separator) is a glyph, not an icon:
-        // in the middle of the dock it lands on top of a neighbouring app
-        // icon. Special entries are therefore emitted at an outer edge, with
-        // the real app icons left contiguous in their pinnedApps order in the
-        // middle. This is placement only — the clock is still gated solely by
-        // dock.clock.enabled, and "__clock__" remains a config slot.
+        // ─── Clock placement follows its "__clock__" slot ────────────────
+        // The clock is a normal delegate with a normal cell, so it can sit
+        // anywhere in the pinned section: it is inserted at the model slot
+        // matching its pinnedApps position, which is what makes drag-reorder
+        // stick. No sentinel yet → leading end (slot 0); the first drag
+        // materialises one there via _applyClockReorder. Gating is solely
+        // dock.clock.enabled; "__clock__" is only a position slot.
         if (root._clockEnabled()) {
-            // Model slot 0 is the leading (left) end, clear of every app icon
-            // on any branch: pinned apps open into it from the right, and the
-            // trailing end belongs to the running section, which reorders
-            // itself. So the leading end is the only edge that is guaranteed
-            // stable and always outermost.
-            // pinnedIndexMap is indexed by model slot, so prepending here
-            // keeps every app entry pointing at its own pinnedApps slot.
-            // -1 = no "__clock__" sentinel in the config, i.e. dropping the
-            // clock here materialises one at the head of pinnedApps.
-            pinnedIndexMap.unshift(root._clockAnchorIndex(pinnedApps))
-            values.unshift(root._clockEntry(0))
-            // order stays dense and equal to the model index: prepend the
-            // clock shifts every later entry up by one.
+            const anchor = root._clockAnchorIndex(pinnedApps)
+            let insertPos = 0
+            if (anchor >= 0) {
+                // pinnedIndexMap covers exactly the pinned section in order,
+                // so the slot is the count of pinned entries ahead of anchor.
+                let before = 0
+                for (let i = 0; i < pinnedIndexMap.length; i++) {
+                    if (pinnedIndexMap[i] >= 0 && pinnedIndexMap[i] < anchor) before++
+                }
+                insertPos = Math.max(0, Math.min(before, pinnedIndexMap.length))
+            }
+            // pinnedIndexMap is indexed by model slot, so splicing here keeps
+            // every app entry pointing at its own pinnedApps slot.
+            pinnedIndexMap.splice(insertPos, 0, anchor)
+            values.splice(insertPos, 0, root._clockEntry(0))
+            // order stays dense and equal to the model index.
             for (let i = 0; i < values.length; i++) {
                 values[i].order = i
             }
@@ -1200,6 +1217,15 @@ Item {
     Connections {
         target: Config
         function onConfigChanged() {
+            root.rebuildDockItems()
+        }
+    }
+
+    // Rebuild when the toplevel list changes (windows open/close) or when the
+    // active toplevel changes (focus switch) so the dock model stays in sync.
+    Connections {
+        target: ToplevelManager.toplevels
+        function onValuesChanged() {
             root.rebuildDockItems()
         }
     }
@@ -1695,12 +1721,12 @@ Item {
     property int _healStrikes: 0
     // Reference geometry, used for diagnostics only — never for health decisions.
     // It cannot be exact: a separator contributes separatorSize along the main axis
-    // (8 across it), a normal button contributes iconSize + 12, and horizontal docks
+    // (8 across it), a normal button contributes the peak-adjusted cell, and horizontal docks
     // further subtract button insets that live on DockButton and are unreachable here.
     function _expectedContentLength(): real {
         const n = dockItems.length
         if (n === 0) return 0
-        const button = effectiveIconSize + 12
+        const button = root._cellMain
         const sep = Math.max(1, (Config.options?.dock?.height ?? 70) - button)
         let total = 0
         for (const item of dockItems) {

@@ -58,6 +58,7 @@ Button {
             IconImage {
                 id: appIcon
                 Layout.alignment: Qt.AlignVCenter
+                asynchronous: true
                 source: {
                     const appId = root.toplevel?.appId ?? "";
                     const de = AppSearch.lookupDesktopEntry(appId);
@@ -148,6 +149,7 @@ Button {
                 opacity: 0.7
                 mipmap: true
                 smooth: true
+                asynchronous: true
             }
 
             // Preview image

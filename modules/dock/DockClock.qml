@@ -1,5 +1,6 @@
 import qs.modules.common
 import qs.modules.common.functions
+import qs.services.Apps
 import QtQuick
 import QtQuick.Layouts
 import Quickshell
@@ -42,6 +43,18 @@ Item {
     // renders at iconSize × iconSize, so the analog face uses the full icon
     // box too (factor 1.0) instead of the old 0.88 inactive-artwork shrink.
     readonly property real _analogFaceSize: root.iconSize
+    readonly property string _bgUrl: {
+        const p = root._isAnalog ? root._analogBackground : root.backgroundSource
+        if (!p) return ""
+        return p.startsWith("file://") ? p : (p.startsWith("/") ? `file://${p}` : p)
+    }
+    readonly property int _bgRasterSize: Math.max(64, Math.round(root.iconSize))
+    readonly property string _bgResolvedSource: {
+        if (!root._bgUrl) return ""
+        return IconThemeService._isSvgUrl(root._bgUrl)
+            ? IconThemeService.rasterFor(root._bgUrl, root._bgRasterSize)
+            : root._bgUrl
+    }
     readonly property bool _analogSeconds: Config.options?.dock?.clock?.analogSeconds ?? false
     readonly property color _analogHandColor: (Config.options?.dock?.clock?.analogHandColor ?? "").length > 0
         ? Config.options.dock.clock.analogHandColor : "white"
@@ -142,8 +155,11 @@ Item {
     readonly property bool hasBackground:
         root._isAnalog ? (root._analogBackground.length > 0) : (root.backgroundSource.length > 0)
     readonly property bool backgroundSettled:
-        !root.hasBackground || clockBackground.status === Image.Ready
-                             || clockBackground.status === Image.Error
+        !root.hasBackground
+        || (!IconThemeService.rasterPending(root._bgUrl, root._bgRasterSize)
+            && (clockBackground.status === Image.Ready
+                || clockBackground.status === Image.Error
+                || clockBackground.source === ""))
     // QML auto-generates backgroundSettledChanged() for this property, which
     // is what the delegate's Connections listens to — declaring it explicitly
     // here would only shadow it with an identical duplicate.
@@ -151,7 +167,10 @@ Item {
     Component.onCompleted: {
         // Delay to ensure Config singleton has loaded (FileView is async)
         root._syncAnalogConfig()
+        IconThemeService.requestRaster(root._bgUrl, root._bgRasterSize)
     }
+
+    on_BgUrlChanged: IconThemeService.requestRaster(root._bgUrl, root._bgRasterSize)
 
     Connections {
         target: Config
@@ -185,10 +204,12 @@ Item {
         visible: root.hasBackground
         width: root._isAnalog ? root._analogFaceSize : root.iconSize
         height: root._isAnalog ? root._analogFaceSize : root.iconSize
-        source: root._isAnalog && root._analogBackground.length > 0 ? root._analogBackground : root.backgroundSource
+        source: root._bgResolvedSource
         sourceSize.width: width
         sourceSize.height: height
         smooth: true
+        asynchronous: true
+        cache: true
         fillMode: Image.PreserveAspectFit
     }
 

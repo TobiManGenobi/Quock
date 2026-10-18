@@ -38,7 +38,10 @@ DockButton {
         return ""
     }
     property bool appIsActive: {
-        if (!CompositorService.hasActiveActivatedToplevel) return false
+        // Under niri the foreign-toplevel `activated` flag is unreliable, so
+        // the gate on hasActiveActivatedToplevel is skipped there: a valid
+        // active key matching one of this app's windows is sufficient.
+        if (!CompositorService.isNiri && !CompositorService.hasActiveActivatedToplevel) return false
         const activeKey = CompositorService.activeToplevelKey
         if (activeKey.length === 0) return false
         for (let i = 0; i < toplevels.length; i++) {
@@ -227,11 +230,12 @@ DockButton {
     function _newestActivatableWindow(list): var {
         if (!list) return null
         // Mock keeps overwriting the candidate so the newest activatable wins.
+        let candidate = null
         for (let i = 0; i < list.length; i++) {
             if (root._canActivateWindow(list[i]))
-                return list[i]
+                candidate = list[i]
         }
-        return null
+        return candidate
     }
 
     function _setPendingLaunchFocus(value): void {
@@ -459,9 +463,11 @@ DockButton {
         return 0;
     }
 
-    // Base scale for the whole button (mock: iconScale = active ? activeScale
-    // : inactiveScale). Magnification multiplies this on the icon itself.
-    scale: appIsActive ? (Config.options?.dock?.activeScale ?? 1.0) : (Config.options?.dock?.inactiveScale ?? 0.85)
+    // Base scale lives on the delegate instance in DockApps.qml ( mock:
+    // iconScale = active ? activeScale : inactiveScale). It is set from
+    // outside, which overrides any value here — so no scale is defined here,
+    // to avoid a dead line that looks editable but does nothing.
+    // Magnification multiplies the delegate scale on the icon itself.
     Behavior on scale {
         enabled: Appearance.animationsEnabled
         animation: NumberAnimation { duration: Appearance.animation.elementMoveFast.duration; easing.type: Appearance.animation.elementMoveFast.type }
@@ -530,7 +536,12 @@ DockButton {
         IconThemeService.resolveIconUrl(root._resolvedIconName)
     enabled: !isSeparator
 
-    readonly property real dockHeight: Config.options?.dock?.height ?? 70
+    // Real pill thickness (same formula as Dock._thicknessFor): icon slot
+    // plus padding. The old code subtracted the unrelated config `height`
+    // (60) from the slot (92), which always floored to 1.
+    readonly property real _pillThickness:
+        root.iconSize + 12 + (Config.options?.dock?.crossAxisPadding ?? 0) * 2
+    // Base slot so magnified icons may overhang the background.
     readonly property real _buttonSize: root.iconSize + 12
     // Pixel size SVGs are rasterised at — generously, so magnified icons stay
     // crisp (roughly 3x the dock's logical icon size).
@@ -539,7 +550,7 @@ DockButton {
     // discarded by QML, which is why doing this in `source:` silently did
     // nothing.
     on_ResolvedIconSourceChanged: IconThemeService.requestRaster(root._resolvedIconSource, root._rasterPx)
-    readonly property real separatorSize: Math.max(1, dockHeight - _buttonSize)
+    readonly property real separatorSize: Math.max(1, root._pillThickness - _buttonSize)
 
 
     implicitWidth: isSeparator ? (vertical ? separatorSize : 8) : (vertical ? root._buttonSize : (root._buttonSize - topInset - bottomInset))
@@ -688,7 +699,10 @@ DockButton {
         // ToplevelManager.activeToplevel, which is populated under niri.
         const total = toplevels.length
         let seed = -1
-        if (CompositorService.hasActiveActivatedToplevel && root.activeWindowKey.length > 0) {
+        // Same key-only rule as appIsActive: under niri the activated flag is
+        // unreliable, so seed from the focused-window key alone.
+        const gateOk = CompositorService.isNiri ? true : CompositorService.hasActiveActivatedToplevel
+        if (gateOk && root.activeWindowKey.length > 0) {
             for (let i = 0; i < total; i++) {
                 if (root._toplevelKey(toplevels[i]) === root.activeWindowKey) {
                     seed = i
@@ -1275,7 +1289,8 @@ DockButton {
                           // property" at the closing </svg>). A blank for that
                           // moment is covered by _checkIconStatus(), which
                           // holds the dock closed while a raster is pending.
-                          source: IconThemeService.rasterOrBlank(root._resolvedIconSource, root._rasterPx)
+                          source: IconThemeService.rasterFor(root._resolvedIconSource, root._rasterPx)
+                          asynchronous: true
                           // Explicit fixed size: every icon renders in the same
                           // iconSize box regardless of the source's intrinsic
                           // dimensions, so a changed app icon can't resize the
@@ -1345,6 +1360,7 @@ DockButton {
                           backer.sourceSize.width: 0
                           backer.sourceSize.height: 0
                           backer.smooth: true
+                          backer.asynchronous: true
                       }
                       onLoaded: root._checkIconStatus(iconImageLoader.item)
                   }

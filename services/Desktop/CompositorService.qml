@@ -42,6 +42,15 @@ Singleton {
         function onValuesChanged() { root._rebuildSortedToplevels() }
     }
 
+    // Focus changes do not alter the toplevel list, so onValuesChanged never
+    // fires for a pure focus switch (same windows, new active). Without this
+    // the enriched snapshots — and the dock's per-app toplevel map built from
+    // them — go stale and the previously-active icon keeps matching.
+    Connections {
+        target: ToplevelManager
+        function onActiveToplevelChanged() { root._rebuildSortedToplevels() }
+    }
+
     Component.onCompleted: root._rebuildSortedToplevels()
 
     // Snapshot of the active toplevel's key, updated in the same cycle as
